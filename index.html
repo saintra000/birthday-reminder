@@ -1,11 +1,12 @@
-<!-- Add these inside <head> or just before </body> -->
-<script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-analytics.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
-<script>
-  // Your web app's Firebase configuration
+<!-- Firebase (modular, from CDN) -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+  import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+  import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+  // ✅ Your real config
   const firebaseConfig = {
     apiKey: "AIzaSyBVc4MLw_oziGSsmsrBAGMg-q8NYhNC5Jg",
     authDomain: "birthday-reminder-6d215.firebaseapp.com",
@@ -16,12 +17,198 @@
     measurementId: "G-TLRE5CD62F"
   };
 
-  // Initialize Firebase
-  const app = firebase.initializeApp(firebaseConfig);
-  const analytics = firebase.analytics(app);
-  const db = firebase.firestore();
-  const auth = firebase.auth();
+  // Init
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db   = getFirestore(app);
 
-  // Optional: enable anonymous auth so you can save files/data
-  auth.signInAnonymously().catch(err => console.error(err));
+  // One shared document (rename "default" per class if you want)
+  const DATA_REF = doc(db, "birthday_app", "default");
+
+  // --- helpers already in your page ---
+  const modalEl = document.getElementById('custom-modal');
+  const modalTextEl = document.getElementById('modal-text');
+  const showMessage = (m) => { modalTextEl.textContent = m; modalEl.style.display = 'flex'; };
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    // elements from your UI
+    const dataUploadEl = document.getElementById('data-upload');
+    const downloadTemplateEl = document.getElementById('download-template');
+    const uploadSectionEl = document.getElementById('upload-section');
+    const retrieveUploadButton = document.getElementById('retrieve-upload-button');
+    const birthdayMessageEl = document.getElementById('birthday-message');
+    const dashboardMessageEl = document.getElementById('dashboard-message');
+    const todayDateEl = document.getElementById('today-date');
+    const upcomingBirthdaysContainer = document.getElementById('upcoming-birthdays-container');
+    const toggleUpcomingButton = document.getElementById('toggle-upcoming-button');
+    const upcomingListWrapper = document.getElementById('upcoming-list-wrapper');
+    const upcomingListEl = document.getElementById('upcoming-list');
+
+    const defaultCSV = `First name,Last name,What is the month of your Birthday?,What day of the month is your birthday?
+Aaron,Oun,3,19
+Adi,Sous,11,21
+Alex,Aguiar,4,7
+Allegh,Huoth,4,16
+Amalia,Awah,2,3
+Lucas,Skywalker,9,14`;
+
+    let allBirthdays = [];
+
+    // --- parsing (same headers you used) ---
+    const parseCSV = (text) => {
+      const lines = text.trim().split('\n');
+      if (lines.length < 2) return [];
+      const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+      const idx = {
+        first: headers.indexOf('first name'),
+        last:  headers.indexOf('last name'),
+        mm:    headers.indexOf('what is the month of your birthday?'),
+        dd:    headers.indexOf('what day of the month is your birthday?'),
+      };
+      if (Object.values(idx).some(v => v === -1)) return [];
+      const out = [];
+      for (let i = 1; i < lines.length; i++) {
+        const p = lines[i].split(',');
+        const first = p[idx.first]?.trim() || '';
+        const last  = p[idx.last]?.trim() || '';
+        const mm    = (p[idx.mm]?.trim() || '').padStart(2,'0');
+        const dd    = (p[idx.dd]?.trim() || '').padStart(2,'0');
+        if (mm && dd) out.push({ name: `${first} ${last}`, birthday: `${mm}/${dd}` });
+      }
+      return out;
+    };
+    const parseXLSX = (bin) => {
+      const wb = XLSX.read(bin, { type: 'binary' });
+      const sh = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sh, { header: 1 });
+      if (rows.length < 2) return [];
+      const headers = rows[0].map(h => (h ?? '').toString().trim().toLowerCase());
+      const idx = {
+        first: headers.indexOf('first name'),
+        last:  headers.indexOf('last name'),
+        mm:    headers.indexOf('what is the month of your birthday?'),
+        dd:    headers.indexOf('what day of the month is your birthday?'),
+      };
+      if (Object.values(idx).some(v => v === -1)) return [];
+      const out = [];
+      for (let i = 1; i < rows.length; i++) {
+        const r = rows[i];
+        const first = (r[idx.first] ?? '').toString().trim();
+        const last  = (r[idx.last]  ?? '').toString().trim();
+        const mm    = (r[idx.mm]    ?? '').toString().trim().padStart(2,'0');
+        const dd    = (r[idx.dd]    ?? '').toString().trim().padStart(2,'0');
+        if (mm && dd) out.push({ name: `${first} ${last}`, birthday: `${mm}/${dd}` });
+      }
+      return out;
+    };
+
+    // --- UI helpers (today + upcoming) ---
+    function updateDashboard() {
+      const now = new Date();
+      const mm = String(now.getMonth()+1).padStart(2,'0');
+      const dd = String(now.getDate()).padStart(2,'0');
+      const today = `${mm}/${dd}`;
+      todayDateEl.textContent = today;
+
+      const todays = allBirthdays.filter(s => s.birthday === today);
+      if (todays.length) {
+        const names = todays.map(s => s.name).join(' and ');
+        birthdayMessageEl.textContent = `🎉 Happy Birthday${todays.length>1?'s':''}, ${names}! 🎉`;
+        dashboardMessageEl.textContent = "It's a special day!";
+        setTimeout(() => { birthdayMessageEl.classList.remove('scale-0'); birthdayMessageEl.classList.add('scale-100'); }, 100);
+      } else {
+        birthdayMessageEl.classList.remove('scale-100');
+        birthdayMessageEl.classList.add('scale-0');
+        birthdayMessageEl.textContent = '';
+        dashboardMessageEl.textContent = 'No birthdays today.';
+      }
+
+      const tm = now.getMonth()+1, td = now.getDate();
+      const sorted = [...allBirthdays].sort((a,b) => {
+        const [am,ad] = a.birthday.split('/').map(Number);
+        const [bm,bd] = b.birthday.split('/').map(Number);
+        let aDiff = (am*100+ad)-(tm*100+td); if (aDiff < 0) aDiff += 1231;
+        let bDiff = (bm*100+bd)-(tm*100+td); if (bDiff < 0) bDiff += 1231;
+        return aDiff - bDiff;
+      });
+      const upcoming = sorted.filter(s => s.birthday !== `${String(tm).padStart(2,'0')}/${String(td).padStart(2,'0')}`).slice(0,5);
+      const ul = upcomingListEl;
+      ul.innerHTML = '';
+      if (!upcoming.length) ul.innerHTML = '<li class="text-sm text-gray-500">No upcoming birthdays.</li>';
+      else upcoming.forEach(s => { const li = document.createElement('li'); li.textContent = `${s.name} - ${s.birthday}`; ul.appendChild(li); });
+    }
+
+    function loadAndDisplay(file, payload) {
+      let parsed = [];
+      const ext = file.name.split('.').pop().toLowerCase();
+      if (ext === 'csv') parsed = parseCSV(payload);
+      else if (ext === 'xlsx') parsed = parseXLSX(payload);
+      else return showMessage('Unsupported file type. Please upload a .csv or .xlsx file.');
+      if (!parsed.length) return showMessage('The uploaded file is not in the expected format. Please check the header names.');
+
+      allBirthdays = parsed;
+      upcomingBirthdaysContainer.classList.remove('hidden');
+      updateDashboard();
+      uploadSectionEl.classList.add('hidden');
+      retrieveUploadButton.classList.remove('hidden');
+
+      // Save to Firestore
+      setDoc(DATA_REF, { updatedAt: new Date().toISOString(), data: allBirthdays }).catch(console.error);
+    }
+
+    // Sign in, then try to load saved data
+    try { await signInAnonymously(auth); } catch (e) { console.warn('Anon auth error', e); }
+    try {
+      const snap = await getDoc(DATA_REF);
+      if (snap.exists() && Array.isArray(snap.data().data)) {
+        allBirthdays = snap.data().data;
+        upcomingBirthdaysContainer.classList.remove('hidden');
+        updateDashboard();
+        uploadSectionEl.classList.add('hidden');
+        retrieveUploadButton.classList.remove('hidden');
+        dashboardMessageEl.textContent = "Birthdays loaded from database.";
+      } else {
+        // fallback to sample
+        loadAndDisplay({ name: 'birthday_template.csv' }, defaultCSV);
+      }
+    } catch (e) {
+      console.error(e);
+      loadAndDisplay({ name: 'birthday_template.csv' }, defaultCSV);
+    }
+
+    // Upload handlers
+    dataUploadEl.addEventListener('change', e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      const ext = file.name.split('.').pop().toLowerCase();
+      reader.onload = ev => loadAndDisplay(file, ev.target.result);
+      if (ext === 'csv') reader.readAsText(file);
+      else if (ext === 'xlsx') reader.readAsBinaryString(file);
+      else showMessage('Unsupported file type. Please upload a .csv or .xlsx file.');
+    });
+
+    retrieveUploadButton.addEventListener('click', () => {
+      uploadSectionEl.classList.remove('hidden');
+      retrieveUploadButton.classList.add('hidden');
+    });
+
+    toggleUpcomingButton.addEventListener('click', () => {
+      const hidden = upcomingListWrapper.classList.toggle('hidden');
+      toggleUpcomingButton.textContent = hidden ? 'Show Upcoming Birthdays' : 'Hide Upcoming Birthdays';
+    });
+
+    // Download template
+    downloadTemplateEl.addEventListener('click', () => {
+      const a = document.createElement('a');
+      a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(defaultCSV);
+      a.download = 'birthday_template.csv';
+      document.body.appendChild(a); a.click(); a.remove();
+    });
+
+    // Auto-refresh at midnight
+    const now = new Date();
+    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1, 0, 0, 0);
+    setTimeout(() => window.location.reload(), midnight.getTime() - now.getTime());
+  });
 </script>
