@@ -105,11 +105,10 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
         // Global variables provided by the environment
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
@@ -143,19 +142,23 @@
             const upcomingListEl = document.getElementById('upcoming-list');
             
             // Firebase setup
-            const app = initializeApp(firebaseConfig);
-            const db = getFirestore(app);
-            const auth = getAuth(app);
+            let app, db, auth;
+            if (Object.keys(firebaseConfig).length > 0) {
+                app = firebase.initializeApp(firebaseConfig);
+                db = firebase.firestore();
+                auth = firebase.auth();
+            } else {
+                showMessage("Firebase configuration is missing. Data will not be saved.");
+            }
             let userId = null;
 
             try {
                 if (initialAuthToken) {
-                    const userCredential = await signInWithCustomToken(auth, initialAuthToken);
-                    userId = userCredential.user.uid;
+                    await auth.signInWithCustomToken(initialAuthToken);
                 } else {
-                    const userCredential = await signInAnonymously(auth);
-                    userId = userCredential.user.uid;
+                    await auth.signInAnonymously();
                 }
+                userId = auth.currentUser.uid;
             } catch (error) {
                 console.error("Firebase Auth Error: ", error);
                 userId = crypto.randomUUID();
@@ -262,7 +265,11 @@ Lucas,Skywalker,9,14`;
                      showMessage("The uploaded file is not in the expected format. Please check the header names.");
                 } else {
                      allBirthdays = parsedData;
-                     await setDoc(doc(db, firestorePath), { data: JSON.stringify(allBirthdays) });
+                     if (db) {
+                         await db.collection(`artifacts/${appId}/users/${userId}/birthday_data`).doc('birthdays').set({ data: JSON.stringify(allBirthdays) });
+                     } else {
+                         showMessage("Cannot save to database. Firebase not initialized.");
+                     }
                      
                      upcomingBirthdaysContainer.classList.remove('hidden');
 
@@ -418,21 +425,31 @@ Lucas,Skywalker,9,14`;
             });
 
             // Initial load from Firebase
-            const docRef = doc(db, firestorePath);
-            const docSnap = await getDoc(docRef);
-            
-            if (docSnap.exists()) {
-                allBirthdays = JSON.parse(docSnap.data().data);
-                dashboardMessageEl.textContent = "Birthdays loaded from database.";
+            if (db) {
+                const docRef = db.collection(`artifacts/${appId}/users/${userId}/birthday_data`).doc('birthdays');
+                const docSnap = await docRef.get();
                 
-                upcomingBirthdaysContainer.classList.remove('hidden');
-                updateDashboard();
-                uploadSectionEl.classList.add('hidden');
-                retrieveUploadButton.classList.remove('hidden');
+                if (docSnap.exists) {
+                    allBirthdays = JSON.parse(docSnap.data().data);
+                    dashboardMessageEl.textContent = "Birthdays loaded from database.";
+                    
+                    upcomingBirthdaysContainer.classList.remove('hidden');
+                    updateDashboard();
+                    uploadSectionEl.classList.add('hidden');
+                    retrieveUploadButton.classList.remove('hidden');
+                } else {
+                    // If no data in Firebase, use the default CSV
+                    loadAndDisplay({ name: 'birthday_template.csv' }, defaultCSV);
+                }
             } else {
-                // If no data in Firebase, use the default CSV
-                loadAndDisplay({ name: 'birthday_template.csv' }, defaultCSV);
+                // If Firebase not initialized, use default CSV data
+                allBirthdays = parseCSV(defaultCSV);
+                dashboardMessageEl.textContent = "Using default data. Firebase is not configured.";
+                updateDashboard();
+                upcomingBirthdaysContainer.classList.remove('hidden');
+                uploadSectionEl.classList.remove('hidden');
             }
+
 
             // Refresh logic - check for birthdays every day (e.g., at midnight)
             const now = new Date();
