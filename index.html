@@ -11,7 +11,7 @@
     <style>
         body {
             font-family: 'Balsamiq Sans', cursive;
-            background: linear-gradient(135deg, #f6d365 0%, #fda085 100%);
+            background: linear-gradient(135deg, #d4edda 0%, #f4f7d2 100%);
         }
         .confetti {
             position: absolute;
@@ -62,7 +62,7 @@
     <div id="custom-modal" class="modal">
         <div class="modal-content">
             <p id="modal-text" class="text-xl mb-4"></p>
-            <button id="modal-close-button" class="bg-indigo-500 text-white font-bold py-2 px-4 rounded-full hover:bg-indigo-600 transition-colors">OK</button>
+            <button id="modal-close-button" class="bg-emerald-600 text-white font-bold py-2 px-4 rounded-full hover:bg-emerald-700 transition-colors">OK</button>
         </div>
     </div>
 
@@ -77,22 +77,44 @@
             <h2 class="text-xl md:text-2xl font-bold mb-4">Birthday Reminders</h2>
             <div class="text-sm font-semibold mb-2 text-gray-700">Today's Date: <span id="today-date"></span></div>
             <div id="dashboard-message" class="text-lg md:text-xl text-gray-700 font-semibold mb-4">
-                No birthdays today.
+                Loading birthdays...
+            </div>
+            
+            <!-- Upcoming Birthdays -->
+            <div id="upcoming-birthdays-container" class="mt-6 hidden">
+                <button id="toggle-upcoming-button" class="text-sm font-semibold text-emerald-600 hover:text-emerald-800 transition-colors focus:outline-none">
+                    Show Upcoming Birthdays
+                </button>
+                <div id="upcoming-list-wrapper" class="mt-4 p-4 bg-gray-100 rounded-lg shadow-inner hidden">
+                    <h3 class="text-lg font-bold mb-2 text-gray-700">Upcoming Birthdays</h3>
+                    <ul id="upcoming-list" class="text-left text-sm space-y-2 text-gray-600">
+                        <!-- Upcoming birthdays will be inserted here -->
+                    </ul>
+                </div>
             </div>
 
             <!-- Upload New Data -->
             <div id="upload-section" class="mt-6 flex flex-col items-center">
                 <p class="mb-2 text-gray-600 text-sm">Upload a new CSV or XLSX file to update the birthdays:</p>
                 <input type="file" id="data-upload" accept=".csv, .xlsx" class="mb-4 text-sm md:text-base border border-gray-300 rounded-lg p-2 bg-gray-50 hover:bg-gray-100 transition-colors cursor-pointer">
-                <a id="download-template" href="#" class="text-sm text-indigo-600 hover:text-indigo-800 underline transition-colors">Download Template CSV</a>
+                <a id="download-template" href="#" class="text-sm text-emerald-600 hover:text-emerald-800 underline transition-colors">Download Template CSV</a>
             </div>
             
-            <button id="retrieve-upload-button" class="hidden mt-6 bg-gray-200 text-gray-700 font-bold py-2 px-4 rounded-full hover:bg-gray-300 transition-colors">Retrieve Upload</button>
+            <button id="retrieve-upload-button" class="hidden mt-6 bg-gray-300 text-gray-700 font-bold py-2 px-4 rounded-full hover:bg-gray-400 transition-colors">Retrieve Upload</button>
         </div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global variables provided by the environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
         // Modal functions
         const modalEl = document.getElementById('custom-modal');
         const modalTextEl = document.getElementById('modal-text');
@@ -107,7 +129,7 @@
             modalEl.style.display = 'none';
         });
 
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
             const birthdayMessageEl = document.getElementById('birthday-message');
             const dashboardMessageEl = document.getElementById('dashboard-message');
             const todayDateEl = document.getElementById('today-date');
@@ -115,7 +137,32 @@
             const downloadTemplateEl = document.getElementById('download-template');
             const uploadSectionEl = document.getElementById('upload-section');
             const retrieveUploadButton = document.getElementById('retrieve-upload-button');
+            const upcomingBirthdaysContainer = document.getElementById('upcoming-birthdays-container');
+            const toggleUpcomingButton = document.getElementById('toggle-upcoming-button');
+            const upcomingListWrapper = document.getElementById('upcoming-list-wrapper');
+            const upcomingListEl = document.getElementById('upcoming-list');
             
+            // Firebase setup
+            const app = initializeApp(firebaseConfig);
+            const db = getFirestore(app);
+            const auth = getAuth(app);
+            let userId = null;
+
+            try {
+                if (initialAuthToken) {
+                    const userCredential = await signInWithCustomToken(auth, initialAuthToken);
+                    userId = userCredential.user.uid;
+                } else {
+                    const userCredential = await signInAnonymously(auth);
+                    userId = userCredential.user.uid;
+                }
+            } catch (error) {
+                console.error("Firebase Auth Error: ", error);
+                userId = crypto.randomUUID();
+            }
+
+            const firestorePath = `artifacts/${appId}/users/${userId}/birthday_data/birthdays`;
+
             // Sample CSV data matching the new format
             const defaultCSV = `First name,Last name,What is the month of your Birthday?,What day of the month is your birthday?
 Aaron,Oun,3,19
@@ -125,8 +172,7 @@ Allegh,Huoth,4,16
 Amalia,Awah,2,3
 Lucas,Skywalker,9,14`;
 
-            let birthdays = [];
-            let todayBirthdays = [];
+            let allBirthdays = [];
 
             // Function to parse CSV data based on the new format
             function parseCSV(csvText) {
@@ -147,10 +193,10 @@ Lucas,Skywalker,9,14`;
                 for (let i = 1; i < lines.length; i++) {
                     const parts = lines[i].split(',');
                     if (parts.length === headers.length) {
-                        const firstName = parts[firstNameIndex].trim();
-                        const lastName = parts[lastNameIndex].trim();
-                        const month = parts[monthIndex].trim().padStart(2, '0');
-                        const day = parts[dayIndex].trim().padStart(2, '0');
+                        const firstName = parts[firstNameIndex]?.trim() || '';
+                        const lastName = parts[lastNameIndex]?.trim() || '';
+                        const month = parts[monthIndex]?.trim().padStart(2, '0') || '';
+                        const day = parts[dayIndex]?.trim().padStart(2, '0') || '';
                         
                         if (month && day) {
                             const name = `${firstName} ${lastName}`;
@@ -184,24 +230,22 @@ Lucas,Skywalker,9,14`;
                 const result = [];
                 for (let i = 1; i < jsonData.length; i++) {
                     const row = jsonData[i];
-                    if (row.length === headers.length) {
-                        const firstName = row[firstNameIndex]?.toString().trim() || '';
-                        const lastName = row[lastNameIndex]?.toString().trim() || '';
-                        const month = row[monthIndex]?.toString().trim().padStart(2, '0') || '';
-                        const day = row[dayIndex]?.toString().trim().padStart(2, '0') || '';
-                        
-                        if (month && day) {
-                            const name = `${firstName} ${lastName}`;
-                            const birthday = `${month}/${day}`;
-                            result.push({ name, birthday });
-                        }
+                    const firstName = (row[firstNameIndex] ?? '').toString().trim();
+                    const lastName = (row[lastNameIndex] ?? '').toString().trim();
+                    const month = (row[monthIndex] ?? '').toString().trim().padStart(2, '0');
+                    const day = (row[dayIndex] ?? '').toString().trim().padStart(2, '0');
+                    
+                    if (month && day) {
+                        const name = `${firstName} ${lastName}`;
+                        const birthday = `${month}/${day}`;
+                        result.push({ name, birthday });
                     }
                 }
                 return result;
             }
 
             // Function to load and display data
-            function loadAndDisplay(file, data) {
+            async function loadAndDisplay(file, data) {
                 let parsedData = [];
                 const fileType = file.name.split('.').pop().toLowerCase();
                 
@@ -214,29 +258,34 @@ Lucas,Skywalker,9,14`;
                     return;
                 }
 
-                birthdays = parsedData;
-                if (birthdays.length === 0) {
+                if (parsedData.length === 0) {
                      showMessage("The uploaded file is not in the expected format. Please check the header names.");
                 } else {
-                     checkBirthdays();
+                     allBirthdays = parsedData;
+                     await setDoc(doc(db, firestorePath), { data: JSON.stringify(allBirthdays) });
+                     
+                     upcomingBirthdaysContainer.classList.remove('hidden');
+
+                     updateDashboard();
                      uploadSectionEl.classList.add('hidden');
                      retrieveUploadButton.classList.remove('hidden');
                 }
             }
 
-            // Function to check for today's birthdays
-            function checkBirthdays() {
-                let today = new Date();
+            // Function to check for today's birthdays and upcoming birthdays
+            function updateDashboard() {
+                // Today's birthdays
+                const now = new Date();
                 // For testing, uncomment the line below to simulate a specific date
-                // today = new Date('2025-09-14T12:00:00');
+                // const now = new Date('2025-09-14T12:00:00');
                 
-                const todayMonth = (today.getMonth() + 1).toString().padStart(2, '0');
-                const todayDay = today.getDate().toString().padStart(2, '0');
+                const todayMonth = (now.getMonth() + 1).toString().padStart(2, '0');
+                const todayDay = now.getDate().toString().padStart(2, '0');
                 const todayDate = `${todayMonth}/${todayDay}`;
 
                 todayDateEl.textContent = `${todayMonth}/${todayDay}`;
 
-                todayBirthdays = birthdays.filter(student => {
+                const todayBirthdays = allBirthdays.filter(student => {
                     const [month, day] = student.birthday.split('/').map(part => part.padStart(2, '0'));
                     return `${month}/${day}` === todayDate;
                 });
@@ -262,6 +311,51 @@ Lucas,Skywalker,9,14`;
                     birthdayMessageEl.classList.add('scale-0');
                     birthdayMessageEl.textContent = '';
                     dashboardMessageEl.textContent = "No birthdays today.";
+                }
+
+                // Upcoming birthdays
+                const upcomingBirthdays = getUpcomingBirthdays(allBirthdays, now, 5);
+                displayUpcomingBirthdays(upcomingBirthdays);
+            }
+            
+            // Function to sort and get upcoming birthdays
+            function getUpcomingBirthdays(students, now, count) {
+                const todayMonth = now.getMonth() + 1;
+                const todayDay = now.getDate();
+                
+                const sorted = [...students].sort((a, b) => {
+                    const [aMonth, aDay] = a.birthday.split('/').map(Number);
+                    const [bMonth, bDay] = b.birthday.split('/').map(Number);
+
+                    let aDiff = (aMonth * 100 + aDay) - (todayMonth * 100 + todayDay);
+                    if (aDiff < 0) aDiff += 1231; // Add a large number to put past birthdays at the end
+
+                    let bDiff = (bMonth * 100 + bDay) - (todayMonth * 100 + todayDay);
+                    if (bDiff < 0) bDiff += 1231;
+
+                    return aDiff - bDiff;
+                });
+
+                // Filter out today's birthdays and duplicates, then take the next 'count'
+                const upcoming = sorted.filter(b => {
+                    const [month, day] = b.birthday.split('/').map(part => part.padStart(2, '0'));
+                    return `${month}/${day}` !== `${(todayMonth).toString().padStart(2,'0')}/${todayDay.toString().padStart(2,'0')}`;
+                });
+                
+                return upcoming.slice(0, count);
+            }
+
+            // Function to display upcoming birthdays in the list
+            function displayUpcomingBirthdays(birthdays) {
+                upcomingListEl.innerHTML = '';
+                if (birthdays.length === 0) {
+                    upcomingListEl.innerHTML = '<li class="text-sm text-gray-500">No upcoming birthdays.</li>';
+                } else {
+                    birthdays.forEach(student => {
+                        const li = document.createElement('li');
+                        li.textContent = `${student.name} - ${student.birthday}`;
+                        upcomingListEl.appendChild(li);
+                    });
                 }
             }
 
@@ -304,6 +398,12 @@ Lucas,Skywalker,9,14`;
                 uploadSectionEl.classList.remove('hidden');
                 retrieveUploadButton.classList.add('hidden');
             });
+            
+            // Handle upcoming birthdays toggle
+            toggleUpcomingButton.addEventListener('click', () => {
+                const isHidden = upcomingListWrapper.classList.toggle('hidden');
+                toggleUpcomingButton.textContent = isHidden ? 'Show Upcoming Birthdays' : 'Hide Upcoming Birthdays';
+            });
 
 
             // Make sample CSV downloadable
@@ -317,8 +417,23 @@ Lucas,Skywalker,9,14`;
                 document.body.removeChild(element);
             });
 
-            // Initial load with default data
-            loadAndDisplay({ name: 'birthday_template.csv' }, defaultCSV);
+            // Initial load from Firebase
+            const docRef = doc(db, firestorePath);
+            const docSnap = await getDoc(docRef);
+            
+            if (docSnap.exists()) {
+                allBirthdays = JSON.parse(docSnap.data().data);
+                dashboardMessageEl.textContent = "Birthdays loaded from database.";
+                
+                upcomingBirthdaysContainer.classList.remove('hidden');
+                updateDashboard();
+                uploadSectionEl.classList.add('hidden');
+                retrieveUploadButton.classList.remove('hidden');
+            } else {
+                // If no data in Firebase, use the default CSV
+                loadAndDisplay({ name: 'birthday_template.csv' }, defaultCSV);
+            }
+
             // Refresh logic - check for birthdays every day (e.g., at midnight)
             const now = new Date();
             const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0);
