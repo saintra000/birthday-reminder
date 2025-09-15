@@ -105,17 +105,7 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
-        import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
-
-        // Global variables provided by the environment
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        const authToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-
+    <script>
         // Modal functions
         const modalEl = document.getElementById('custom-modal');
         const modalTextEl = document.getElementById('modal-text');
@@ -143,30 +133,6 @@
             const upcomingListWrapper = document.getElementById('upcoming-list-wrapper');
             const upcomingListEl = document.getElementById('upcoming-list');
             
-            // Firebase setup
-            let db;
-            if (Object.keys(firebaseConfig).length > 0) {
-                const app = initializeApp(firebaseConfig);
-                const auth = getAuth(app);
-                db = getFirestore(app);
-
-                try {
-                    if (authToken) {
-                        await signInWithCustomToken(auth, authToken);
-                    } else {
-                        await signInAnonymously(auth);
-                    }
-                } catch (error) {
-                    console.error("Firebase Auth Error: ", error);
-                    showMessage("Authentication failed. Data may not be saved.");
-                }
-            } else {
-                showMessage("Firebase configuration is missing. Data will not be saved.");
-            }
-            
-            const firestorePath = `artifacts/${appId}/public/data/birthday_data`;
-            const birthdayDocRef = doc(db, firestorePath, 'birthdays');
-
             // Sample CSV data matching the new format
             const defaultCSV = `First name,Last name,What is the month of your Birthday?,What day of the month is your birthday?
 Aaron,Oun,3,19
@@ -266,11 +232,6 @@ Lucas,Skywalker,9,14`;
                      showMessage("The uploaded file is not in the expected format. Please check the header names.");
                 } else {
                      allBirthdays = parsedData;
-                     if (db) {
-                         await setDoc(birthdayDocRef, { data: JSON.stringify(allBirthdays) });
-                     } else {
-                         showMessage("Cannot save to database. Firebase not initialized.");
-                     }
                      
                      upcomingBirthdaysContainer.classList.remove('hidden');
 
@@ -425,30 +386,12 @@ Lucas,Skywalker,9,14`;
                 document.body.removeChild(element);
             });
 
-            // Initial load from Firebase
-            if (db) {
-                const docSnap = await getDoc(birthdayDocRef);
-                
-                if (docSnap.exists()) {
-                    allBirthdays = JSON.parse(docSnap.data().data);
-                    dashboardMessageEl.textContent = "Birthdays loaded from database.";
-                    
-                    upcomingBirthdaysContainer.classList.remove('hidden');
-                    updateDashboard();
-                    uploadSectionEl.classList.add('hidden');
-                    retrieveUploadButton.classList.remove('hidden');
-                } else {
-                    // If no data in Firebase, use the default CSV
-                    loadAndDisplay({ name: 'birthday_template.csv' }, defaultCSV);
-                }
-            } else {
-                // If Firebase not initialized, use default CSV data
-                allBirthdays = parseCSV(defaultCSV);
-                dashboardMessageEl.textContent = "Using default data. Firebase is not configured.";
-                updateDashboard();
-                upcomingBirthdaysContainer.classList.remove('hidden');
-                uploadSectionEl.classList.remove('hidden');
-            }
+            // Initial load from default CSV
+            allBirthdays = parseCSV(defaultCSV);
+            dashboardMessageEl.textContent = "Using default data. Please upload your file.";
+            updateDashboard();
+            upcomingBirthdaysContainer.classList.remove('hidden');
+            uploadSectionEl.classList.remove('hidden');
 
 
             // Refresh logic - check for birthdays every day (e.g., at midnight)
