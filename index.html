@@ -233,6 +233,9 @@ Lucas,Skywalker,9,14`;
                 } else {
                      allBirthdays = parsedData;
                      
+                     // Save to localStorage
+                     localStorage.setItem('birthdayData', JSON.stringify(allBirthdays));
+
                      upcomingBirthdaysContainer.classList.remove('hidden');
 
                      updateDashboard();
@@ -386,12 +389,22 @@ Lucas,Skywalker,9,14`;
                 document.body.removeChild(element);
             });
 
-            // Initial load from default CSV
-            allBirthdays = parseCSV(defaultCSV);
-            dashboardMessageEl.textContent = "Using default data. Please upload your file.";
-            updateDashboard();
-            upcomingBirthdaysContainer.classList.remove('hidden');
-            uploadSectionEl.classList.remove('hidden');
+            // Initial load from localStorage or default CSV
+            const savedData = localStorage.getItem('birthdayData');
+            if (savedData) {
+                allBirthdays = JSON.parse(savedData);
+                dashboardMessageEl.textContent = "Birthdays loaded from your browser's storage.";
+                upcomingBirthdaysContainer.classList.remove('hidden');
+                updateDashboard();
+                uploadSectionEl.classList.add('hidden');
+                retrieveUploadButton.classList.remove('hidden');
+            } else {
+                allBirthdays = parseCSV(defaultCSV);
+                dashboardMessageEl.textContent = "Using default data. Please upload your file.";
+                upcomingBirthdaysContainer.classList.remove('hidden');
+                uploadSectionEl.classList.remove('hidden');
+                updateDashboard();
+            }
 
 
             // Refresh logic - check for birthdays every day (e.g., at midnight)
