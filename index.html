@@ -107,11 +107,14 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
 
         // Global variables provided by the environment
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const authToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
 
         // Modal functions
         const modalEl = document.getElementById('custom-modal');
@@ -144,13 +147,24 @@
             let db;
             if (Object.keys(firebaseConfig).length > 0) {
                 const app = initializeApp(firebaseConfig);
+                const auth = getAuth(app);
                 db = getFirestore(app);
+
+                try {
+                    if (authToken) {
+                        await signInWithCustomToken(auth, authToken);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                } catch (error) {
+                    console.error("Firebase Auth Error: ", error);
+                    showMessage("Authentication failed. Data may not be saved.");
+                }
             } else {
                 showMessage("Firebase configuration is missing. Data will not be saved.");
             }
-            let userId = 'teacher-dashboard-user'; // Hardcoded user ID for a single-user app
-
-            const firestorePath = `artifacts/${appId}/users/${userId}/birthday_data`;
+            
+            const firestorePath = `artifacts/${appId}/public/data/birthday_data`;
             const birthdayDocRef = doc(db, firestorePath, 'birthdays');
 
             // Sample CSV data matching the new format
