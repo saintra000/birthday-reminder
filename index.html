@@ -105,10 +105,12 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
     <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, collection, getDocs, setLogLevel } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
+
+        setLogLevel('debug');
         // Global variables provided by the environment
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
@@ -142,11 +144,11 @@
             const upcomingListEl = document.getElementById('upcoming-list');
             
             // Firebase setup
-            let app, db, auth;
+            let db, auth;
             if (Object.keys(firebaseConfig).length > 0) {
-                app = firebase.initializeApp(firebaseConfig);
-                db = firebase.firestore();
-                auth = firebase.auth();
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
             } else {
                 showMessage("Firebase configuration is missing. Data will not be saved.");
             }
@@ -154,9 +156,9 @@
 
             try {
                 if (initialAuthToken) {
-                    await auth.signInWithCustomToken(initialAuthToken);
+                    await signInWithCustomToken(auth, initialAuthToken);
                 } else {
-                    await auth.signInAnonymously();
+                    await signInAnonymously(auth);
                 }
                 userId = auth.currentUser.uid;
             } catch (error) {
@@ -164,7 +166,8 @@
                 userId = crypto.randomUUID();
             }
 
-            const firestorePath = `artifacts/${appId}/users/${userId}/birthday_data/birthdays`;
+            const firestorePath = `artifacts/${appId}/users/${userId}/birthday_data`;
+            const birthdayDocRef = doc(db, firestorePath, 'birthdays');
 
             // Sample CSV data matching the new format
             const defaultCSV = `First name,Last name,What is the month of your Birthday?,What day of the month is your birthday?
@@ -266,7 +269,7 @@ Lucas,Skywalker,9,14`;
                 } else {
                      allBirthdays = parsedData;
                      if (db) {
-                         await db.collection(`artifacts/${appId}/users/${userId}/birthday_data`).doc('birthdays').set({ data: JSON.stringify(allBirthdays) });
+                         await setDoc(birthdayDocRef, { data: JSON.stringify(allBirthdays) });
                      } else {
                          showMessage("Cannot save to database. Firebase not initialized.");
                      }
@@ -426,10 +429,9 @@ Lucas,Skywalker,9,14`;
 
             // Initial load from Firebase
             if (db) {
-                const docRef = db.collection(`artifacts/${appId}/users/${userId}/birthday_data`).doc('birthdays');
-                const docSnap = await docRef.get();
+                const docSnap = await getDoc(birthdayDocRef);
                 
-                if (docSnap.exists) {
+                if (docSnap.exists()) {
                     allBirthdays = JSON.parse(docSnap.data().data);
                     dashboardMessageEl.textContent = "Birthdays loaded from database.";
                     
