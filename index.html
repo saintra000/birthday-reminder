@@ -107,13 +107,11 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
 
         // Global variables provided by the environment
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
         // Modal functions
         const modalEl = document.getElementById('custom-modal');
@@ -143,27 +141,14 @@
             const upcomingListEl = document.getElementById('upcoming-list');
             
             // Firebase setup
-            let db, auth;
+            let db;
             if (Object.keys(firebaseConfig).length > 0) {
                 const app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
-                auth = getAuth(app);
             } else {
                 showMessage("Firebase configuration is missing. Data will not be saved.");
             }
-            let userId = null;
-
-            try {
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    await signInAnonymously(auth);
-                }
-                userId = auth.currentUser.uid;
-            } catch (error) {
-                console.error("Firebase Auth Error: ", error);
-                userId = crypto.randomUUID();
-            }
+            let userId = 'teacher-dashboard-user'; // Hardcoded user ID for a single-user app
 
             const firestorePath = `artifacts/${appId}/users/${userId}/birthday_data`;
             const birthdayDocRef = doc(db, firestorePath, 'birthdays');
